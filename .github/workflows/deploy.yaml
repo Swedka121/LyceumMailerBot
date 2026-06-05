@@ -1,13 +1,14 @@
 # @format
 
 name: Build, Push, and Deploy Bot to GHCR
+
 on:
   push:
     branches: [main]
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: lyceum-mailer-bot
 
 jobs:
   build-and-push:
@@ -29,6 +30,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set lower case environment variables
+        run: |
+          LOWER_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "OWNER_LC=${LOWER_OWNER}" >> $GITHUB_ENV
+
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
@@ -40,7 +46,10 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }} / ${{ env.REPOSITORY_OWNER }}
+          images: |
+            ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            latest=false
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -50,8 +59,8 @@ jobs:
           push: true
           platforms: ${{ matrix.platform }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/lyceum-mailer-bot:latest-${{ matrix.suffix }}
-            ghcr.io/${{ github.repository_owner }}/lyceum-mailer-bot:sha-${{ github.sha }}-${{ matrix.suffix }}
+            ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:latest-${{ matrix.suffix }}
+            ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}-${{ matrix.suffix }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
 
@@ -70,18 +79,17 @@ jobs:
 
       - name: Create and push multi-arch manifests
         run: |
-          # Переводимо все в нижній регістр, щоб уникнути помилок Docker з великими літерами
           LOWER_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          LOWER_IMAGE="ghcr.io/${LOWER_OWNER}/lyceum-mailer-bot"
+          LOWER_IMAGE="ghcr.io/${LOWER_OWNER}/${{ env.IMAGE_NAME }}"
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
 
-          # Створюємо маніфест для 'latest'
+          # Створюємо та пушимо маніфест для 'latest'
           docker manifest create $LOWER_IMAGE:latest \
             --amend $LOWER_IMAGE:latest-amd64 \
             --amend $LOWER_IMAGE:latest-arm64
           docker manifest push $LOWER_IMAGE:latest
 
-          # Створюємо маніфест для конкретного SHA комміту
+          # Створюємо та пушимо маніфест для конкретного SHA комміту
           docker manifest create $LOWER_IMAGE:sha-$SHORT_SHA \
             --amend $LOWER_IMAGE:sha-${{ github.sha }}-amd64 \
             --amend $LOWER_IMAGE:sha-${{ github.sha }}-arm64
@@ -94,4 +102,5 @@ jobs:
       - name: Execute local deploy script
         run: |
           echo "🚀 Starting deployment of LyceumMailerBot on ARM64 runner..."
+          chmod +x /home/swedka/Projects/LyceumMailerBot/deploy-bot.sh
           /home/swedka/Projects/LyceumMailerBot/deploy-bot.sh
