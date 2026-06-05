@@ -1,17 +1,10 @@
-FROM oven/bun:latest AS base
+FROM oven/bun:1.3.14-alpine AS prod
 
-FROM base AS builder
 WORKDIR /bot
-COPY ./src ./src
-COPY package.json ./
-COPY tsconfig.json ./
+
+COPY package.json bun.lockb* tsconfig.json ./
 RUN bun install
-RUN ls -l
-RUN bun run build
 
-FROM base AS prod
-WORKDIR /bot
-COPY --from=builder /bot/dist ./dist
-COPY package.json ./
-RUN bun install --only=production
-CMD ["bun", "dist/index.js"]
+COPY . .
+
+CMD ["bun", "src/index.ts"]
