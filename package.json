@@ -32,7 +32,7 @@
   },
   "scripts": {
     "dev": "bun run ./src/index.ts --watch",
-    "build": "bun build ./src/index.ts --outdir ./dist --target=bun --external=util --external=node:util --target=bun --external=expo-sqlite --external=react-native-sqlite-storage --external=ibmi --external=spanner"
+    "build": "bun build ./src/index.ts --outdir ./dist --target=bun --external=util --external=node:util --target=bun --external=expo-sqlite --external=react-native-sqlite-storage --external=ibmi --external=spanner --sourcemap"
   },
   "license": "GPL-3.0-only"
 }
