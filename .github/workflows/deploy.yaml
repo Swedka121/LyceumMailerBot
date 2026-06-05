@@ -1,0 +1,97 @@
+# @format
+
+name: Build, Push, and Deploy Bot to GHCR
+on:
+  push:
+    branches: [dev]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux/amd64
+            suffix: amd64
+          - os: ARM64
+            platform: linux/arm64
+            suffix: arm64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }} / ${{ env.REPOSITORY_OWNER }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: ${{ matrix.platform }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/lyceum-mailer-bot:latest-${{ matrix.suffix }}
+            ghcr.io/${{ github.repository_owner }}/lyceum-mailer-bot:sha-${{ github.sha }}-${{ matrix.suffix }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+
+  create-manifest:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    permissions:
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push multi-arch manifests
+        run: |
+          # Переводимо все в нижній регістр, щоб уникнути помилок Docker з великими літерами
+          LOWER_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          LOWER_IMAGE="ghcr.io/${LOWER_OWNER}/lyceum-mailer-bot"
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+
+          # Створюємо маніфест для 'latest'
+          docker manifest create $LOWER_IMAGE:latest \
+            --amend $LOWER_IMAGE:latest-amd64 \
+            --amend $LOWER_IMAGE:latest-arm64
+          docker manifest push $LOWER_IMAGE:latest
+
+          # Створюємо маніфест для конкретного SHA комміту
+          docker manifest create $LOWER_IMAGE:sha-$SHORT_SHA \
+            --amend $LOWER_IMAGE:sha-${{ github.sha }}-amd64 \
+            --amend $LOWER_IMAGE:sha-${{ github.sha }}-arm64
+          docker manifest push $LOWER_IMAGE:sha-$SHORT_SHA
+
+  deploy:
+    runs-on: ARM64
+    needs: create-manifest
+    steps:
+      - name: Execute local deploy script
+        run: |
+          echo "🚀 Starting deployment of LyceumMailerBot on ARM64 runner..."
+          /home/swedka/Projects/LyceumMailerBot/deploy-bot.sh

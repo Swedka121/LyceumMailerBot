@@ -1,0 +1,33 @@
+# @format
+
+services:
+  bot:
+    build: { context: ., dockerfile: Dockerfile.dev }
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - ./src:/bot/src
+    networks:
+      - database_network
+    ports:
+      - "3000:3000"
+    expose:
+      - "3000"
+  database:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: bot_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - db_data:/var/lib/postgresql
+    networks:
+      - database_network
+volumes:
+  db_data:
+
+networks:
+  database_network:
+    driver: bridge

@@ -1,0 +1,10 @@
+FROM oven/bun:latest
+
+WORKDIR /bot
+
+COPY package.json ./
+RUN bun install
+COPY . .
+
+
+CMD ["bun", "--watch", "src/index.ts"]

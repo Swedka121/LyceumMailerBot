@@ -1,0 +1,27 @@
+# @format
+
+services:
+  bot:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    networks:
+      - database_network
+  database:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: bot
+    ports:
+      - "5433:5432"
+    volumes:
+      - db_data:/var/lib/postgresql
+    networks:
+      - database_network
+volumes:
+  db_data:
+
+networks:
+  database_network:
+    driver: bridge
