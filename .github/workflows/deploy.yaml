@@ -102,5 +102,4 @@ jobs:
       - name: Execute local deploy script
         run: |
           echo "🚀 Starting deployment of LyceumMailerBot on ARM64 runner..."
-          chmod +x /home/swedka/Projects/LyceumMailerBot/deploy-bot.sh
-          /home/swedka/Projects/LyceumMailerBot/deploy-bot.sh
+          /home/backend-service/deploy-bot.sh
