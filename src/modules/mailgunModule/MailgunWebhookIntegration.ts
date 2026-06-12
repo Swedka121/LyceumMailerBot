@@ -199,6 +199,37 @@ export class MailgunWebhookIntegration extends MailgunWrapper {
       }
     });
 
+    this.express.get("/test_task", async (req, res) => {
+      const { secret } = req.query;
+
+      if (secret !== GLOBAL.config.testSecretPass) {
+        this.logger.warn(
+          "Someone tried to call test endpoint with incorrect test pass",
+        );
+        return res.status(404).json({ message: "Cannot GET /test_task" });
+      }
+
+      try {
+        this.logger.info(
+          "Manual trigger for cronJob initiated via /test_task...",
+        );
+
+        await GLOBAL.sender.cronJobCheckTasks();
+
+        return res.status(200).json({ message: "Success, look for logs!" });
+      } catch (error) {
+        this.logger.error(
+          "Error during manual cronJobCheckTasks execution via /test_task:",
+          error as Error,
+        );
+
+        return res.status(500).json({
+          message: "Internal Server Error during cron execution",
+          error: (error as Error).message,
+        });
+      }
+    });
+
     const extractTaskId = (body: any): string | null => {
       const eventData = body["event-data"];
       if (!eventData) return null;

@@ -29,6 +29,12 @@ export class MailgunTemplateSender extends MailgunWrapper {
   constructor() {
     super();
     new CronJob("0 0 * * * *", this.cronJob.bind(this), null, true);
+    new CronJob(
+      "0 30 */2 * * *",
+      this.cronJobCheckTasks.bind(this),
+      null,
+      true,
+    );
   }
 
   async send(
@@ -63,6 +69,44 @@ export class MailgunTemplateSender extends MailgunWrapper {
       );
     }
     await repoNode.save(nodes);
+  }
+
+  async cronJobCheckTasks() {
+    try {
+      const repoNode = GLOBAL.datasource.getRepository(SpammingNodeSchema);
+      const repo = GLOBAL.datasource.getRepository(SpammingTaskSchema);
+
+      const tasks = await repo.find({
+        where: { status: SpammingTaskStatus.inProgress },
+      });
+
+      for (let task of tasks) {
+        const successfulOrFailedNodes = await repoNode.count({
+          where: {
+            status: In([
+              SpammingNodeStatus.failed,
+              SpammingNodeStatus.successful,
+            ]),
+            spammingTaskId: task.id,
+          },
+        });
+
+        if (task.shouldBeDelivered == successfulOrFailedNodes) {
+          await repo.update(
+            { id: task.id },
+            { status: SpammingTaskStatus.completed },
+          );
+          await GLOBAL.botManager.telegraf.api.sendMessage(
+            task.userId,
+            `Розсилка з id: <code>${task.id}</code> успішно завершена, ви можете завантажити звіт в історії розсилок`,
+            { parse_mode: "HTML" },
+          );
+        }
+      }
+    } catch (error) {
+      const err = error as Error & { status: string; details: string };
+      this.logger.error(err.message);
+    }
   }
 
   async cronJob() {
