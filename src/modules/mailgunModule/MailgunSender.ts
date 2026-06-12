@@ -18,6 +18,7 @@ const chunkArray = <T>(array: T[], size: number): T[][] => {
   }
   return chunks;
 };
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class MailgunTemplateSender extends MailgunWrapper {
   private logger = createLogger("Mailgun Sender");
@@ -71,6 +72,11 @@ export class MailgunTemplateSender extends MailgunWrapper {
           "h:X-Sended-By": "lyceum1mailerbot",
           "v:spammingTaskId": task.id,
         });
+
+        if (i < toChunks.length - 1) {
+          this.logger.info(`Waiting 60000ms before next batch...`);
+          await delay(60000);
+        }
       }
 
       task.status = SpammingTaskStatus.completed;
