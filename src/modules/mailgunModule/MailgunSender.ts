@@ -77,8 +77,11 @@ export class MailgunTemplateSender extends MailgunWrapper {
       await repo.save(task);
 
       this.logger.info("Spamming is started successfully for all batches");
-    } catch (err) {
-      this.logger.error((err as Error).message);
+    } catch (error) {
+      const err = error as Error & { status: string; details: string };
+      this.logger.error(
+        `Mailgun Error: ${err.message} | Status: ${err.status} | Details: ${JSON.stringify(err.details || err)}`,
+      );
 
       await repo
         .save(task)
