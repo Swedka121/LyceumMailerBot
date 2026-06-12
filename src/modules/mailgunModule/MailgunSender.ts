@@ -151,7 +151,7 @@ export class MailgunTemplateSender extends MailgunWrapper {
             );
 
             if (i + chunkSize < val.length) {
-              await delay(3000);
+              await delay(20000);
             }
           } catch (chunkError) {
             const err = chunkError as Error & {
