@@ -1,8 +1,11 @@
 /** @format */
 
 import { EventSubscriber } from "typeorm";
-import type { EntitySubscriberInterface, InsertEvent } from "typeorm";
-import { SpammingNodeSchema } from "../schemas/SpammingNode.schema";
+import type { EntitySubscriberInterface, UpdateEvent } from "typeorm";
+import {
+  SpammingNodeSchema,
+  SpammingNodeStatus,
+} from "../schemas/SpammingNode.schema";
 import {
   SpammingTaskSchema,
   SpammingTaskStatus,
@@ -11,42 +14,49 @@ import { GLOBAL } from "../globals";
 import { createLogger } from "../logger";
 
 @EventSubscriber()
-export class SpammingNodeCreatedSubsriber implements EntitySubscriberInterface<SpammingNodeSchema> {
-  private logger = createLogger("Spamming Node Created Subsriber");
+export class SpammingNodeUpdatedSubscriber implements EntitySubscriberInterface<SpammingNodeSchema> {
+  private logger = createLogger("Spamming Node Updated Subscriber");
+
   listenTo(): Function | string {
     return SpammingNodeSchema;
   }
 
-  async afterInsert(event: InsertEvent<SpammingNodeSchema>): Promise<any> {
+  async afterUpdate(event: UpdateEvent<SpammingNodeSchema>): Promise<any> {
     try {
-      if (!event.entity || !event.entity.spammingTaskId) return;
+      const isStatusUpdated = event.updatedColumns.some(
+        (col) => col.propertyName === "status",
+      );
+      if (!isStatusUpdated || !event.entity) return;
 
-      const spammingTask = await event.manager
-        .getRepository(SpammingTaskSchema)
-        .findOne({ where: { id: event.entity.spammingTaskId } });
+      const currentStatus = event.entity.status;
+      if (currentStatus === SpammingNodeStatus.pending) return;
 
-      if (!spammingTask) return;
+      const taskId = event.entity.spammingTaskId;
+      if (!taskId) return;
 
-      const processedNodesCount = await event.manager
-        .getRepository(SpammingNodeSchema)
-        .count({
-          where: { spammingTaskId: spammingTask!.id },
-        });
+      const taskRepo = event.manager.getRepository(SpammingTaskSchema);
+      const spammingTask = await taskRepo.findOne({ where: { id: taskId } });
 
-      if (
-        spammingTask.status === SpammingTaskStatus.inProgress &&
-        spammingTask.shouldBeDelivered == processedNodesCount
-      ) {
+      if (!spammingTask || spammingTask.status === SpammingTaskStatus.completed)
+        return;
+
+      const nodeRepo = event.manager.getRepository(SpammingNodeSchema);
+      const remainingNodesCount = await nodeRepo.count({
+        where: {
+          spammingTaskId: taskId,
+          status: SpammingNodeStatus.pending,
+        },
+      });
+
+      if (remainingNodesCount === 0) {
         spammingTask.status = SpammingTaskStatus.completed;
-        await event.manager
-          .getRepository(SpammingTaskSchema)
-          .save(spammingTask);
+        await taskRepo.save(spammingTask);
 
         setImmediate(async () => {
           try {
             await GLOBAL.bot.api.sendMessage(
               spammingTask.userId,
-              `🎉 <b>Розсилку успішно завершено!</b>\n Ви можете завантажити звіт в <i>історії розсилок</i>`,
+              `🎉 <b>Розсилку повністю завершено!</b>\nУсі вебхуки від Mailgun оброблено. Ви можете завантажити фінальний звіт в <i>історії розсилок</i>`,
               { parse_mode: "HTML" },
             );
           } catch {

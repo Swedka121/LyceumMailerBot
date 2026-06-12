@@ -6,7 +6,7 @@ import { UserSchema } from "./schemas/User.schema";
 import { createLogger } from "./logger";
 import { SpammingTaskSchema } from "./schemas/SpammingTask.schema";
 import { SpammingNodeSchema } from "./schemas/SpammingNode.schema";
-import { SpammingNodeCreatedSubsriber } from "./subscibers/SpammingNodeCreated.subscibers";
+import { SpammingNodeUpdatedSubscriber } from "./subscibers/SpammingNodeCreated.subscibers";
 
 const logger = createLogger("Datasource");
 
@@ -20,7 +20,7 @@ export async function initDatasource() {
     database: GLOBAL.config.databaseName,
     synchronize: true,
     applicationName: "LyceumMailerBot",
-    subscribers: [SpammingNodeCreatedSubsriber],
+    subscribers: [SpammingNodeUpdatedSubscriber],
     entities: [UserSchema, SpammingTaskSchema, SpammingNodeSchema],
   });
 

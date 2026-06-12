@@ -3,25 +3,29 @@
 import Mailgun from "mailgun.js";
 import { GLOBAL } from "../../globals";
 import { createLogger } from "../../logger";
-import type { BaseEmailTemplate } from "../emailTemplates/BaseEmailTemplate";
-import { randomUUIDv5, randomUUIDv7 } from "bun";
+import {
+  EmailTemplate,
+  type BaseEmailTemplate,
+} from "../emailTemplates/BaseEmailTemplate";
 import { MailgunWrapper } from "./MailgunWrapper";
 import {
   SpammingTaskSchema,
   SpammingTaskStatus,
 } from "../../schemas/SpammingTask.schema";
-
-const chunkArray = <T>(array: T[], size: number): T[][] => {
-  const chunks: T[][] = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
-  }
-  return chunks;
-};
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+import {
+  SpammingNodeSchema,
+  SpammingNodeStatus,
+} from "../../schemas/SpammingNode.schema";
+import { In } from "typeorm";
+import { CronJob } from "cron";
 
 export class MailgunTemplateSender extends MailgunWrapper {
   private logger = createLogger("Mailgun Sender");
+
+  constructor() {
+    super();
+    new CronJob("0 0 * * * *", this.cronJob.bind(this), null, true);
+  }
 
   async send(
     to: string[],
@@ -31,6 +35,7 @@ export class MailgunTemplateSender extends MailgunWrapper {
     author: string,
   ) {
     const repo = GLOBAL.datasource.getRepository(SpammingTaskSchema);
+    const repoNode = GLOBAL.datasource.getRepository(SpammingNodeSchema);
 
     const task = repo.create({
       shouldBeDelivered: to.length,
@@ -41,61 +46,101 @@ export class MailgunTemplateSender extends MailgunWrapper {
     });
     await repo.save(task);
 
+    const nodes = [];
+
+    for (let i = 0; i < to.length; i++) {
+      nodes.push(
+        repoNode.create({
+          email: to[i],
+          spammingTaskId: task.id,
+          status: SpammingNodeStatus.pending,
+          vars: data[i],
+        }),
+      );
+    }
+    await repoNode.save(nodes);
+  }
+
+  async cronJob() {
     try {
-      const templateMailgunName = (
-        "auto-" + template.name.replaceAll(" ", "_")
-      ).toLowerCase();
+      const repoNode = GLOBAL.datasource.getRepository(SpammingNodeSchema);
+      const repo = GLOBAL.datasource.getRepository(SpammingTaskSchema);
 
-      const batchSize = 5;
-      const toChunks = chunkArray(to, batchSize);
-      const dataChunks = chunkArray(data, batchSize);
+      const emails = await repoNode.find({
+        where: { status: SpammingNodeStatus.pending },
+        take: 95,
+        order: {
+          createdAt: "ASC",
+        },
+      });
 
-      for (let i = 0; i < toChunks.length; i++) {
-        const currentTo = toChunks[i] || [];
-        const currentData = dataChunks[i] || [];
+      const groups = new Map<string, SpammingNodeSchema[]>();
 
-        const recipientVariables: Record<string, Record<string, unknown>> = {};
+      emails.forEach((node) => {
+        if (groups.get(node.spammingTaskId)) {
+          groups.set(node.spammingTaskId, [
+            ...groups.get(node.spammingTaskId)!,
+            node,
+          ]);
+        } else {
+          groups.set(node.spammingTaskId, [node]);
+        }
+      });
 
-        currentTo.forEach((email, index) => {
-          recipientVariables[email] = currentData[index] || {};
-        });
+      for (let [key, val] of groups.entries()) {
+        const nodeIds = val.map((node) => node.id);
 
-        if (currentTo.length === 0) continue;
+        const task = await repo.findOne({ where: { id: key } });
+        if (!task) throw Error("Meow");
 
-        await this.mailgun.messages.create(GLOBAL.config.mailgunDomain, {
-          to: currentTo,
-          from: `${GLOBAL.config.mailgunEmailName} <mailer@${GLOBAL.config.mailgunDomain}>`,
-          subject: template.subject,
-          template: templateMailgunName,
-          "recipient-variables": JSON.stringify(recipientVariables),
-          "t:version": "initial",
-          "h:X-Sended-By": "lyceum1mailerbot",
-          "v:spammingTaskId": task.id,
-        });
+        const template = GLOBAL.botManager.getTemplate(task.templateId);
 
-        if (i < toChunks.length - 1) {
-          this.logger.info(`Waiting 60000ms before next batch...`);
-          await delay(60000);
+        try {
+          const templateMailgunName = (
+            "auto-" + template.name.replaceAll(" ", "_")
+          ).toLowerCase();
+
+          const toChunks = val.map((node) => node.email);
+          const dataChunks = val.map((node) => node.vars);
+
+          const recipientVariables: Record<
+            string,
+            Record<string, unknown>
+          > = {};
+
+          toChunks.forEach((email, index) => {
+            recipientVariables[email] = dataChunks[index] || {};
+          });
+
+          if (toChunks.length === 0) throw new Error("");
+
+          await this.mailgun.messages.create(GLOBAL.config.mailgunDomain, {
+            to: toChunks,
+            from: `${GLOBAL.config.mailgunEmailName} <mailer@${GLOBAL.config.mailgunDomain}>`,
+            subject: template.subject,
+            template: templateMailgunName,
+            "recipient-variables": JSON.stringify(recipientVariables),
+            "t:version": "initial",
+            "h:X-Sended-By": "lyceum1mailerbot",
+            "v:spammingTaskId": task.id,
+          });
+
+          await repo.save(task);
+        } catch (error) {
+          const err = error as Error & { status: string; details: string };
+          this.logger.error(
+            `Mailgun Error: ${err.message} | Status: ${err.status} | Details: ${JSON.stringify(err.details || err)}`,
+          );
+
+          await repoNode.update(
+            { id: In(nodeIds) },
+            { status: SpammingNodeStatus.failed },
+          );
         }
       }
-
-      task.status = SpammingTaskStatus.completed;
-      await repo.save(task);
-
-      this.logger.info("Spamming is started successfully for all batches");
     } catch (error) {
       const err = error as Error & { status: string; details: string };
-      this.logger.error(
-        `Mailgun Error: ${err.message} | Status: ${err.status} | Details: ${JSON.stringify(err.details || err)}`,
-      );
-
-      await repo
-        .save(task)
-        .catch((dbErr) =>
-          this.logger.error("DB Update failed: " + dbErr.message),
-        );
-
-      throw new Error("Не вдалося розпочати розсилку");
+      this.logger.error(err.message);
     }
   }
 }

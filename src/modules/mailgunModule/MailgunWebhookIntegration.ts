@@ -206,13 +206,10 @@ export class MailgunWebhookIntegration extends MailgunWrapper {
         }
 
         const nodeRepository = myReq.manager.getRepository(SpammingNodeSchema);
-        const node = nodeRepository.create({
-          spammingTaskId: taskId,
-          email: eventData.recipient,
-          status: SpammingNodeStatus.failed,
-        });
-
-        await nodeRepository.save(node);
+        await nodeRepository.update(
+          { spammingTaskId: taskId, email: eventData.recipient },
+          { status: SpammingNodeStatus.failed },
+        );
 
         res.status(200).send("OK");
         next();
@@ -235,13 +232,10 @@ export class MailgunWebhookIntegration extends MailgunWrapper {
         }
 
         const nodeRepository = myReq.manager.getRepository(SpammingNodeSchema);
-        const node = nodeRepository.create({
-          spammingTaskId: taskId,
-          email: eventData.recipient,
-          status: SpammingNodeStatus.failed,
-        });
-
-        await nodeRepository.save(node);
+        await nodeRepository.update(
+          { spammingTaskId: taskId, email: eventData.recipient },
+          { status: SpammingNodeStatus.failed },
+        );
 
         res.status(200).send("OK");
         next();
@@ -264,13 +258,10 @@ export class MailgunWebhookIntegration extends MailgunWrapper {
         }
 
         const nodeRepository = myReq.manager.getRepository(SpammingNodeSchema);
-        const node = nodeRepository.create({
-          spammingTaskId: taskId,
-          email: eventData.recipient,
-          status: SpammingNodeStatus.successful,
-        });
-
-        await nodeRepository.save(node);
+        await nodeRepository.update(
+          { spammingTaskId: taskId, email: eventData.recipient },
+          { status: SpammingNodeStatus.successful },
+        );
 
         res.status(200).send("OK");
         next();

@@ -13,6 +13,7 @@ import { SpammingTaskSchema } from "./SpammingTask.schema";
 export enum SpammingNodeStatus {
   failed = "failed",
   successful = "successful",
+  pending = "pending",
 }
 
 @Entity("spamming_node")
@@ -36,6 +37,12 @@ export class SpammingNodeSchema {
     enumName: "spamming_node_status",
   })
   status!: SpammingNodeStatus;
+
+  @Column({
+    type: "jsonb",
+    nullable: true,
+  })
+  vars!: Record<string, unknown>;
 
   @CreateDateColumn()
   createdAt!: Date;
