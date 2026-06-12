@@ -45,7 +45,7 @@ export class MailgunTemplateSender extends MailgunWrapper {
         "auto-" + template.name.replaceAll(" ", "_")
       ).toLowerCase();
 
-      const batchSize = 10;
+      const batchSize = 5;
       const toChunks = chunkArray(to, batchSize);
       const dataChunks = chunkArray(data, batchSize);
 
