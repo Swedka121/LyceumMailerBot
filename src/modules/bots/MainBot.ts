@@ -83,6 +83,8 @@ export class MainBot {
     await this.loadEmailTemplatesFromFolder();
     await this.loadTableLoadersFromFolder();
 
+    this.telegraf.catch((ctx) => ctx.ctx.reply("Помилка - спробуйте ще раз"));
+
     this.telegraf.use(
       session({
         initial: (): ISession => ({}),

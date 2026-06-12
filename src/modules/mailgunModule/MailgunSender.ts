@@ -11,6 +11,14 @@ import {
   SpammingTaskStatus,
 } from "../../schemas/SpammingTask.schema";
 
+const chunkArray = <T>(array: T[], size: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+};
+
 export class MailgunTemplateSender extends MailgunWrapper {
   private logger = createLogger("Mailgun Sender");
 
@@ -21,42 +29,63 @@ export class MailgunTemplateSender extends MailgunWrapper {
     tableLoader: string,
     author: string,
   ) {
+    const repo = GLOBAL.datasource.getRepository(SpammingTaskSchema);
+
+    const task = repo.create({
+      shouldBeDelivered: to.length,
+      tableLoader: tableLoader,
+      userId: author,
+      templateId: template.name,
+      status: SpammingTaskStatus.inProgress,
+    });
+    await repo.save(task);
+
     try {
       const templateMailgunName = (
         "auto-" + template.name.replaceAll(" ", "_")
       ).toLowerCase();
 
-      const recipientVariables: Record<string, Record<string, unknown>> = {};
+      const batchSize = 10;
+      const toChunks = chunkArray(to, batchSize);
+      const dataChunks = chunkArray(data, batchSize);
 
-      to.forEach((email, index) => {
-        recipientVariables[email] = data[index] || {};
-      });
+      for (let i = 0; i < toChunks.length; i++) {
+        const currentTo = toChunks[i] || [];
+        const currentData = dataChunks[i] || [];
 
-      const repo = GLOBAL.datasource.getRepository(SpammingTaskSchema);
+        const recipientVariables: Record<string, Record<string, unknown>> = {};
 
-      const task = repo.create({
-        shouldBeDelivered: to.length,
-        tableLoader: tableLoader,
-        userId: author,
-        templateId: template.name,
-        status: SpammingTaskStatus.inProgress,
-      });
+        currentTo.forEach((email, index) => {
+          recipientVariables[email] = currentData[index] || {};
+        });
 
+        if (currentTo.length === 0) continue;
+
+        await this.mailgun.messages.create(GLOBAL.config.mailgunDomain, {
+          to: currentTo,
+          from: `${GLOBAL.config.mailgunEmailName} <mailer@${GLOBAL.config.mailgunDomain}>`,
+          subject: template.subject,
+          template: templateMailgunName,
+          "recipient-variables": JSON.stringify(recipientVariables),
+          "t:version": "initial",
+          "h:X-Sended-By": "lyceum1mailerbot",
+          "v:spammingTaskId": task.id,
+        });
+      }
+
+      task.status = SpammingTaskStatus.completed;
       await repo.save(task);
 
-      await this.mailgun.messages.create(GLOBAL.config.mailgunDomain, {
-        to,
-        from: `${GLOBAL.config.mailgunEmailName} <mailer@${GLOBAL.config.mailgunDomain}>`,
-        subject: template.subject,
-        template: templateMailgunName,
-        "recipient-variables": JSON.stringify(recipientVariables),
-        "t:version": "initial",
-        "h:X-Sended-By": "lyceum1mailerbot",
-        "v:spammingTaskId": task.id,
-      });
-      this.logger.info("Spamming is started");
+      this.logger.info("Spamming is started successfully for all batches");
     } catch (err) {
       this.logger.error((err as Error).message);
+
+      await repo
+        .save(task)
+        .catch((dbErr) =>
+          this.logger.error("DB Update failed: " + dbErr.message),
+        );
+
       throw new Error("Не вдалося розпочати розсилку");
     }
   }
