@@ -24,6 +24,8 @@ const configSchema = z.object(
       message:
         "Password must be at least 8 characters long and contain an uppercase letter, a lowercase letter, a number, and a special character.",
     }),
+    testSecretPass: z.string(),
+
     databaseUser: z.string(),
     databasePassword: z.string(),
     databaseName: z.string(),
@@ -49,6 +51,7 @@ export class Config {
   public botToken!: string;
   public nodeEnv!: "development" | "production";
   public adminCode!: string;
+  public testSecretPass!: string;
 
   public databaseUser!: string;
   public databaseHost!: string;

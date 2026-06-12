@@ -19,6 +19,10 @@ import {
 import { In } from "typeorm";
 import { CronJob } from "cron";
 
+const delay = (ms: number): Promise<void> => {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+};
+
 export class MailgunTemplateSender extends MailgunWrapper {
   private logger = createLogger("Mailgun Sender");
 
@@ -100,32 +104,38 @@ export class MailgunTemplateSender extends MailgunWrapper {
             "auto-" + template.name.replaceAll(" ", "_")
           ).toLowerCase();
 
-          const toChunks = val.map((node) => node.email);
-          const dataChunks = val.map((node) => node.vars);
+          const chunkSize = 5;
 
-          const recipientVariables: Record<
-            string,
-            Record<string, unknown>
-          > = {};
+          for (let i = 0; i < val.length; i += chunkSize) {
+            const chunkNodes = val.slice(i, i + chunkSize);
 
-          toChunks.forEach((email, index) => {
-            recipientVariables[email] = dataChunks[index] || {};
-          });
+            const toArr = chunkNodes.map((n) => n.email);
+            const recipientVariables: Record<
+              string,
+              Record<string, unknown>
+            > = {};
 
-          if (toChunks.length === 0) throw new Error("");
+            chunkNodes.forEach((node) => {
+              recipientVariables[node.email] = node.vars || {};
+            });
 
-          await this.mailgun.messages.create(GLOBAL.config.mailgunDomain, {
-            to: toChunks,
-            from: `${GLOBAL.config.mailgunEmailName} <mailer@${GLOBAL.config.mailgunDomain}>`,
-            subject: template.subject,
-            template: templateMailgunName,
-            "recipient-variables": JSON.stringify(recipientVariables),
-            "t:version": "initial",
-            "h:X-Sended-By": "lyceum1mailerbot",
-            "v:spammingTaskId": task.id,
-          });
+            if (toArr.length === 0) continue;
 
-          await repo.save(task);
+            await this.mailgun.messages.create(GLOBAL.config.mailgunDomain, {
+              to: toArr,
+              from: `${GLOBAL.config.mailgunEmailName} <mailer@${GLOBAL.config.mailgunDomain}>`,
+              subject: template.subject,
+              template: templateMailgunName,
+              "recipient-variables": JSON.stringify(recipientVariables),
+              "t:version": "initial",
+              "h:X-Sended-By": "lyceum1mailerbot",
+              "v:spammingTaskId": task.id,
+            });
+
+            if (i + chunkSize < val.length) {
+              await delay(3000);
+            }
+          }
         } catch (error) {
           const err = error as Error & { status: string; details: string };
           this.logger.error(
