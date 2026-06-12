@@ -92,35 +92,44 @@ export class MailgunTemplateSender extends MailgunWrapper {
       });
 
       for (let [key, val] of groups.entries()) {
-        const nodeIds = val.map((node) => node.id);
-
         const task = await repo.findOne({ where: { id: key } });
-        if (!task) throw Error("Meow");
+        if (!task) {
+          this.logger.error(`Таску ${key} не знайдено.`);
+          continue;
+        }
 
         const template = GLOBAL.botManager.getTemplate(task.templateId);
+        if (!template) {
+          this.logger.error(`Шаблон для таски ${task.id} не знайдено.`);
+          const allNodeIds = val.map((node) => node.id);
+          await repoNode.update(
+            { id: In(allNodeIds) },
+            { status: SpammingNodeStatus.failed },
+          );
+          continue;
+        }
 
-        try {
-          const templateMailgunName = (
-            "auto-" + template.name.replaceAll(" ", "_")
-          ).toLowerCase();
+        const templateMailgunName = (
+          "auto-" + template.name.replaceAll(" ", "_")
+        ).toLowerCase();
+        const chunkSize = 5;
 
-          const chunkSize = 5;
+        for (let i = 0; i < val.length; i += chunkSize) {
+          const chunkNodes = val.slice(i, i + chunkSize);
+          const chunkNodeIds = chunkNodes.map((n) => n.id);
+          const toArr = chunkNodes.map((n) => n.email);
 
-          for (let i = 0; i < val.length; i += chunkSize) {
-            const chunkNodes = val.slice(i, i + chunkSize);
+          const recipientVariables: Record<
+            string,
+            Record<string, unknown>
+          > = {};
+          chunkNodes.forEach((node) => {
+            recipientVariables[node.email] = node.vars || {};
+          });
 
-            const toArr = chunkNodes.map((n) => n.email);
-            const recipientVariables: Record<
-              string,
-              Record<string, unknown>
-            > = {};
+          if (toArr.length === 0) continue;
 
-            chunkNodes.forEach((node) => {
-              recipientVariables[node.email] = node.vars || {};
-            });
-
-            if (toArr.length === 0) continue;
-
+          try {
             await this.mailgun.messages.create(GLOBAL.config.mailgunDomain, {
               to: toArr,
               from: `${GLOBAL.config.mailgunEmailName} <mailer@${GLOBAL.config.mailgunDomain}>`,
@@ -132,20 +141,32 @@ export class MailgunTemplateSender extends MailgunWrapper {
               "v:spammingTaskId": task.id,
             });
 
-            if (i + chunkSize < val.length) {
-              await delay(20000);
-            }
-          }
-        } catch (error) {
-          const err = error as Error & { status: string; details: string };
-          this.logger.error(
-            `Mailgun Error: ${err.message} | Status: ${err.status} | Details: ${JSON.stringify(err.details || err)}`,
-          );
+            await repoNode.update(
+              { id: In(chunkNodeIds) },
+              { status: SpammingNodeStatus.pending },
+            );
 
-          await repoNode.update(
-            { id: In(nodeIds) },
-            { status: SpammingNodeStatus.failed },
-          );
+            this.logger.info(
+              `Чанк із ${toArr.length} листів успішно передано в Mailgun`,
+            );
+
+            if (i + chunkSize < val.length) {
+              await delay(3000);
+            }
+          } catch (chunkError) {
+            const err = chunkError as Error & {
+              status: string;
+              details: string;
+            };
+            this.logger.error(
+              `Помилка відправки конкретного чанку (Таска: ${task.id}): ${err.message}`,
+            );
+
+            await repoNode.update(
+              { id: In(chunkNodeIds) },
+              { status: SpammingNodeStatus.failed },
+            );
+          }
         }
       }
     } catch (error) {
